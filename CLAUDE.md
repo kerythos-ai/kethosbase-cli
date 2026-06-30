@@ -61,13 +61,27 @@ Confirmed against the server source (`internal/api/*`):
   the GoTech project once linked.
 - Not yet published; no GitHub repo yet at time of writing this file.
 
+## Distribution (Go single-binary + npm wrapper)
+
+- `.goreleaser.yaml` builds raw binaries `kethosbase_<os>_<arch>[.exe]` (linux/
+  darwin/windows × amd64/arm64) with the version stamped via ldflags into
+  `internal/cli.version`.
+- `.github/workflows/release.yml` runs GoReleaser on a `v*` tag → GitHub Release.
+- `npm/` is the `@kethosbase/cli` wrapper: `install.js` (postinstall) downloads
+  the matching `kethosbase_<os>_<arch>` asset from the release into `npm/bin/`;
+  `bin/kethosbase.js` execs it. Ships no binary itself (tiny package).
+- **Release flow:** `git tag v0.1.0 && git push --tags` (CI builds the release),
+  then `cd npm && npm publish --access public`. Keep `npm/package.json` version
+  == git tag. **Wrapper download is over HTTPS → release assets must be public.**
+  If the repo/releases stay private, switch the wrapper to esbuild-style
+  per-platform npm packages instead.
+
 ## TODO / roadmap
 
-1. Distribution: GoReleaser + GitHub Actions to build cross-platform binaries on
-   tag, and the `@kethosbase/cli` **npm wrapper** that downloads the right binary
-   (the chosen distribution: Go single-binary + npm wrapper).
-2. Live smoke: `migrate up` against a real project DB.
+1. First release: tag `v0.1.0` (CI cuts the GitHub Release), publish the npm
+   wrapper. Confirm release assets are publicly downloadable (repo is private).
+2. Live smoke: `migrate up` against a real project DB (e.g. GoTech once linked).
 3. `gen types` (introspect schema → TS types) — deferred from v0.
 4. Platform ask: a personal access token (PAT) for non-interactive/CI auth, so
-   the CLI is not limited to the 7-day session token.
+   the CLI is not limited to the ~7-day session token.
 5. Later: `db diff`/`db push`, `migrate new <name>` scaffolder.

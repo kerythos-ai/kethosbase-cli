@@ -1,0 +1,29 @@
+{
+  "name": "@kethosbase/cli",
+  "version": "0.1.0",
+  "description": "Kethosbase CLI — login, link, and run database migrations from the terminal.",
+  "bin": {
+    "kethosbase": "bin/kethosbase.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/kethosbase.js",
+    "install.js"
+  ],
+  "keywords": ["kethosbase", "cli", "baas", "migrations", "postgres"],
+  "license": "MIT",
+  "author": "Kerythos AI LLC",
+  "homepage": "https://github.com/kerythos-ai/kethosbase-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kerythos-ai/kethosbase-cli.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

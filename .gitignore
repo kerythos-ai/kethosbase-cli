@@ -4,6 +4,10 @@
 *.exe
 /dist/
 
+# npm wrapper: the platform binary is downloaded at install time, not committed
+/npm/bin/kethosbase-bin*
+/npm/node_modules/
+
 # Local project link / credentials should never live in this repo
 kethosbase.json
 

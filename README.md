@@ -6,11 +6,13 @@ run database migrations from your terminal. Single static Go binary.
 ## Install
 
 ```bash
+# Via npm (downloads the prebuilt binary for your platform)
+npx @kethosbase/cli <command>
+# or install it globally:
+npm i -g @kethosbase/cli
+
 # From source (Go 1.26+)
 go install github.com/kerythos-ai/kethosbase-cli@latest
-
-# (Coming) via npm wrapper:
-#   npx @kethosbase/cli <command>
 ```
 
 ## Usage
@@ -56,6 +58,24 @@ kethosbase migrate up --dir packages/db/migrations
 
 `migrate` resolves the database URL in this order: `--db-url` flag →
 `KETHOSBASE_DB_URL` env → the linked project's stored credential.
+
+## Releasing
+
+Distribution is **Go single binary + npm wrapper**:
+
+1. Tag a version: `git tag v0.1.0 && git push origin v0.1.0`.
+2. GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml))
+   runs GoReleaser, building cross-platform binaries and publishing them as a
+   GitHub Release (`kethosbase_<os>_<arch>[.exe]` + `checksums.txt`).
+3. Publish the npm wrapper (matching version) so `npx @kethosbase/cli` fetches
+   those binaries:
+   ```bash
+   cd npm && npm publish --access public
+   ```
+
+> The wrapper downloads binaries from the release over HTTPS, so the release
+> assets must be **publicly downloadable**. Keep `npm/package.json` `version` in
+> lockstep with the git tag.
 
 ## License
 

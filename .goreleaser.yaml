@@ -1,0 +1,33 @@
+version: 2
+
+project_name: kethosbase
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kethosbase
+    main: .
+    binary: kethosbase
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/kerythos-ai/kethosbase-cli/internal/cli.version={{ .Version }}
+
+# Ship raw binaries (no tar/zip) so the npm wrapper can download a single file
+# named kethosbase_<os>_<arch>[.exe] straight from the GitHub Release.
+archives:
+  - id: bin
+    formats: [binary]
+    name_template: "kethosbase_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: kerythos-ai
+    name: kethosbase-cli
