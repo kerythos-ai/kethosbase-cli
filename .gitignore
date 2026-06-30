@@ -1,0 +1,11 @@
+# Built binaries
+/kethosbase
+/kethosbase.exe
+*.exe
+/dist/
+
+# Local project link / credentials should never live in this repo
+kethosbase.json
+
+# OS / editor noise
+.DS_Store
