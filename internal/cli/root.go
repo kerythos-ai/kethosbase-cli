@@ -21,6 +21,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newLoginCmd())
 	root.AddCommand(newLinkCmd())
 	root.AddCommand(newMigrateCmd())
+	root.AddCommand(newGenCmd())
 	return root
 }
 

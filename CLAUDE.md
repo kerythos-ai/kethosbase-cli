@@ -36,6 +36,9 @@ Go 1.26. Deps: `spf13/cobra` (commands), `jackc/pgx/v5` (Postgres), `golang.org/
 - `internal/migrate/` — migration runner: discovers `*.sql` (lexical order),
   applies each in its own tx, records in a `kethosbase_migrations` ledger with a
   sha256 checksum; rejects an applied file that later changes (drift).
+- `internal/introspect/` — reads tables/columns/enums from a schema (pgx).
+- `internal/gen/` — renders an introspected schema to TypeScript (Supabase-shaped
+  `Database`: per-table Row/Insert/Update + Enums + named enum unions).
 
 ## Control-plane API contract (what the CLI targets)
 
@@ -78,10 +81,11 @@ Confirmed against the server source (`internal/api/*`):
 
 ## TODO / roadmap
 
-1. First release: tag `v0.1.0` (CI cuts the GitHub Release), publish the npm
-   wrapper. Confirm release assets are publicly downloadable (repo is private).
-2. Live smoke: `migrate up` against a real project DB (e.g. GoTech once linked).
-3. `gen types` (introspect schema → TS types) — deferred from v0.
-4. Platform ask: a personal access token (PAT) for non-interactive/CI auth, so
+1. Publish the npm wrapper (owner has npm creds; this machine does not):
+   `cd npm && npm publish --access public`. Repo is public; releases are public.
+2. Live smoke: `migrate up` and `gen types` against a real project DB (GoTech
+   once linked) — not yet run against live Postgres.
+3. Platform ask: a personal access token (PAT) for non-interactive/CI auth, so
    the CLI is not limited to the ~7-day session token.
-5. Later: `db diff`/`db push`, `migrate new <name>` scaffolder.
+4. Later: `db diff`/`db push`, `migrate new <name>` scaffolder, views/functions
+   in `gen types`.

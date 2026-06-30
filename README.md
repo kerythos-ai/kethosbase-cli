@@ -29,6 +29,11 @@ kethosbase link --ref abcdefghijklmnop
 kethosbase migrate up                 # apply all pending .sql files in ./migrations
 kethosbase migrate status             # show applied vs pending
 kethosbase migrate up --dir packages/db/migrations
+
+# 4. Generate TypeScript types from the live schema
+kethosbase gen types                  # prints to stdout
+kethosbase gen types -o src/database.types.ts
+kethosbase gen types --schema public --db-url "postgres://…"
 ```
 
 ## How it works
@@ -48,6 +53,10 @@ kethosbase migrate up --dir packages/db/migrations
   `kethosbase_migrations` ledger table. Re-runs are idempotent; an applied file
   that changes on disk is rejected (checksum drift) — never edit an applied
   migration, add a new one.
+- **`gen types`** → introspects the schema (tables, columns, enums) and emits a
+  Supabase-shaped `Database` TypeScript type (per-table `Row`/`Insert`/`Update`
+  plus an `Enums` map and named enum unions). Insert fields are optional when the
+  database can supply them (default, identity, or nullable).
 
 ## Configuration
 
