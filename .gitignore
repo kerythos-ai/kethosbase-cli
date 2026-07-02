@@ -7,6 +7,8 @@
 # npm wrapper: the platform binary is downloaded at install time, not committed
 /npm/bin/kethosbase-bin*
 /npm/node_modules/
+# npm wrapper README is generated from the repo-root README at pack/publish time
+/npm/README.md
 
 # Local project link / credentials should never live in this repo
 kethosbase.json
