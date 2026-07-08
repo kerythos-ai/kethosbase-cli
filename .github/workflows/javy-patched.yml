@@ -1,0 +1,106 @@
+name: build-patched-javy
+
+# Builds the PATCHED Javy CLI on native runners for every platform the CLI
+# supports, and publishes each binary (+ .sha256) as an asset on a dedicated
+# GitHub Release. `kethosbase functions deploy` downloads the matching binary at
+# runtime (checksum-verified) so end users need no local Rust/Javy toolchain.
+#
+# WHY A PATCH: Javy v9.0.0 runs binaryen wasm-opt with the MVP feature set at
+# BOTH the plugin-initialization step (crates/plugin-processing) and the static
+# `build` step (crates/codegen), and rejects the bulk-memory ops that
+# wasi-libc / QuickJS emit. plugin/javy-toolchain/patch-javy.py adds
+# `.all_features()` to both wasm-opt call sites.
+#
+# Trigger: manually (workflow_dispatch) or by pushing the release tag.
+# The release tag is derived from JAVY_TAG below (javy-patched-<JAVY_TAG>) and
+# must match javytool.JavyVersion in the CLI.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "javy-patched-v*"
+
+permissions:
+  contents: write
+
+env:
+  JAVY_TAG: v9.0.0
+  RELEASE_TAG: javy-patched-v9.0.0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13 # amd64
+            target: x86_64-apple-darwin
+          - os: macos-latest # arm64
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Install LLVM/Clang (for rquickjs-sys bindgen)
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18"
+
+      - name: Clone and patch Javy ${{ env.JAVY_TAG }}
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$JAVY_TAG" \
+            https://github.com/bytecodealliance/javy.git javy-src
+          python3 plugin/javy-toolchain/patch-javy.py javy-src
+
+      - name: Build patched Javy
+        shell: bash
+        env:
+          LIBCLANG_PATH: ${{ env.LLVM_PATH }}/lib
+        run: |
+          cd javy-src
+          # The CLI build script embeds the default plugin, so build it first.
+          cargo build --release --target=wasm32-wasip1 -p javy-plugin
+          cargo build --release -p javy-cli --bin javy
+          ./target/release/javy --version || ./target/release/javy.exe --version
+
+      - name: Package asset (gzip + sha256)
+        shell: bash
+        run: |
+          mkdir -p dist
+          bin="javy-src/target/release/javy"
+          [ -f "$bin" ] || bin="javy-src/target/release/javy.exe"
+          asset="dist/javy-patched-${JAVY_TAG}-${{ matrix.target }}.gz"
+          gzip -c "$bin" > "$asset"
+          # sha256 of the gzipped asset (matches the CLI's verify-before-gunzip).
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$asset" | awk '{print $1}' > "$asset.sha256"
+          else
+            shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
+          fi
+          echo "asset=$asset"; cat "$asset.sha256"
+
+      - name: Upload to release ${{ env.RELEASE_TAG }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Patched Javy ${{ env.JAVY_TAG }}
+          body: |
+            Patched Javy ${{ env.JAVY_TAG }} for Kethosbase Functions
+            (enables all wasm-opt features so bulk-memory output is accepted).
+            Downloaded automatically by `kethosbase functions deploy`.
+          files: |
+            dist/javy-patched-${{ env.JAVY_TAG }}-${{ matrix.target }}.gz
+            dist/javy-patched-${{ env.JAVY_TAG }}-${{ matrix.target }}.gz.sha256
