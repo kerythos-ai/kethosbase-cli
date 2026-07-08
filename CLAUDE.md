@@ -23,12 +23,27 @@ go build -o kethosbase.exe .   # local binary
 ```
 
 Go 1.26. Deps: `spf13/cobra` (commands), `jackc/pgx/v5` (Postgres), `golang.org/x/term`
-(hidden password prompt).
+(hidden password prompt), `evanw/esbuild` (Go library — bundles Function TS/JS for
+`functions deploy`; ADR-0091). External build tools: **Javy** (Bytecode Alliance,
+Apache-2.0) is the JS→WASM compiler for `functions deploy` — a pinned binary
+downloaded on first use with a SHA-256 check (`internal/functions/javytool`), plus
+a vendored custom Javy plugin built from `/plugin`. Approved by ADR-0091 (Javy
+lives in the CLI toolchain, not the product; ADR-0002's zero-Supabase rule is
+about the product surface).
 
 ## Architecture
 
 - `main.go` → `cli.Execute()`.
-- `internal/cli/` — cobra commands: `root.go`, `login.go`, `link.go`, `migrate.go`.
+- `internal/cli/` — cobra commands: `root.go`, `login.go`, `link.go`, `migrate.go`,
+  `gen.go`, `functions.go`.
+- `internal/functions/` — the `functions deploy` pipeline: `bundle/` (esbuild +
+  the `@kethosbase/functions` SDK shim), `javytool/` (pinned Javy download +
+  vendored plugin + `javy build`), `wasmcheck/` (parses a module's imports/exports
+  to validate imports ⊆ {kethosbase, wasi_snapshot_preview1} and `_start` export).
+- `plugin/` — Rust source for the custom Javy plugin (WASI preview 1) that exposes
+  the `__kb_*` bridge globals to QuickJS and forwards to the `kethosbase` host
+  imports. Built once via `plugin/build.sh`; the initialized `.wasm` is vendored
+  and `go:embed`-ed. See `plugin/README.md` for the shared bridge contract.
 - `internal/api/` — thin HTTP client for the control-plane (management) API.
 - `internal/config/` — two stores: `./kethosbase.json` (committable project link,
   no secrets) and `~/.kethosbase/credentials.json` (0600: session token +

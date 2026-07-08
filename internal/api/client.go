@@ -102,6 +102,48 @@ func (c *Client) CreateDBCredential(ctx context.Context, ref, label string, conn
 	return &out, err
 }
 
+// DeployResult is the 201 response from deploying a function.
+type DeployResult struct {
+	Name      string    `json:"name"`
+	SHA256    string    `json:"sha256"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DeployFunction uploads a compiled .wasm module for a function, replacing any
+// existing function of the same name. The body is raw wasm bytes with
+// Content-Type application/wasm. Requires an owner/admin session token and the
+// project's functions gate to be enabled (the server returns 403 otherwise).
+func (c *Client) DeployFunction(ctx context.Context, ref, name string, wasm []byte) (*DeployResult, error) {
+	path := "/v1/projects/" + ref + "/functions/" + name
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(wasm))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/wasm")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("deploy %s: %s", name, apiError(data, resp.StatusCode))
+	}
+	var out DeployResult
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil, err
+		}
+	}
+	return &out, nil
+}
+
 // do performs a JSON request and decodes the response, normalizing both the
 // PostgREST-style `{message}` and the control envelope `{error:{message}}`.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {

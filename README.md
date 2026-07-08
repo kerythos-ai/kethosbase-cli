@@ -34,7 +34,36 @@ kethosbase migrate up --dir packages/db/migrations
 kethosbase gen types                  # prints to stdout
 kethosbase gen types -o src/database.types.ts
 kethosbase gen types --schema public --db-url "postgres://…"
+
+# 5. Deploy an Edge Function written in TypeScript/JavaScript
+kethosbase functions deploy src/hello.ts            # name defaults to "hello"
+kethosbase functions deploy src/hello.ts --name greet --project abcdefghijklmnop
+kethosbase functions deploy src/hello.ts --dry-run -o hello.wasm   # build only
 ```
+
+### Functions (`functions deploy`)
+
+`functions deploy <file.ts>` compiles a TypeScript/JavaScript function to a
+WebAssembly module and uploads it via the management API. The pipeline is:
+
+1. **Bundle** the entrypoint and its imports into a single JS file with
+   [esbuild](https://esbuild.github.io/) (used as a Go library, no separate
+   binary). The `@kethosbase/functions` SDK import resolves to the installed
+   package if present in `node_modules`, otherwise to a built-in shim.
+2. **Compile** the JS to `module.wasm` with [Javy](https://github.com/bytecodealliance/javy)
+   (QuickJS-on-Wasm) plus a custom Kethosbase plugin that exposes the platform
+   host functions (`db`, `fetch`, `secret`, `log`) to the JS runtime. Javy needs
+   a small one-line wasm-opt patch to accept bulk-memory output (see `/plugin`);
+   provide the patched binary via `KETHOSBASE_JAVY`. The plugin is vendored
+   (embedded) — no Rust toolchain needed at runtime.
+3. **Validate** that the module imports only `kethosbase` + `wasi_snapshot_preview1`
+   and exports `_start` (matching the platform's deploy-time validator), and is
+   under 8 MiB.
+4. **Upload** via `POST /v1/projects/{ref}/functions/{name}` with
+   `Content-Type: application/wasm`, using the stored session token.
+
+Realizes ADR-0091 (JS-on-WASM Functions). See `/plugin` for the Javy plugin and
+the shared bridge contract with `@kethosbase/functions`.
 
 ## How it works
 

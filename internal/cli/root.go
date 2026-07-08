@@ -22,6 +22,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newLinkCmd())
 	root.AddCommand(newMigrateCmd())
 	root.AddCommand(newGenCmd())
+	root.AddCommand(newFunctionsCmd())
 	return root
 }
 
