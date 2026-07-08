@@ -7,9 +7,21 @@ Wasm — built once, used on every platform.
 ## Status: committed and working
 
 Built from the Rust source at `/plugin` with a **patched** Javy (see
-`/plugin/javy-toolchain`) and verified end to end: `kethosbase functions deploy
-<serve-handler>.ts --dry-run` produces a real JS module whose imports are exactly
-`{kethosbase, wasi_snapshot_preview1}` and which exports `_start`.
+`/plugin/javy-toolchain`) and verified end to end: a real `serve()` handler that
+calls `db.query` + `log` boots under QuickJS, reaches the DB query, and returns a
+200 JSON response. Its imports are exactly `{kethosbase, wasi_snapshot_preview1}`
+and it exports `_start`. See `/plugin/javy-toolchain/smoke.py` for the
+boot-and-run smoke (stubs the host imports and feeds a request envelope).
+
+Two runtime requirements are baked into this plugin (`plugin/src/lib.rs`):
+
+- **Event loop enabled** (`config.event_loop(true)`): `serve()` takes an `async`
+  handler, so a promise is pending after `_start`; without the event loop QuickJS
+  traps with "Pending jobs in the event queue".
+- **QuickJS-safe SDK**: QuickJS provides no `TextEncoder`/`TextDecoder`/`atob`/
+  `btoa`/`Buffer`/`crypto`. The embedded `sdk_shim.js` implements UTF-8 + base64
+  in pure JS (a Go test enforces this). `text_encoding(true)` is also enabled so
+  user code that references `TextEncoder`/`TextDecoder` still works.
 
 ## Why a patched Javy is needed
 

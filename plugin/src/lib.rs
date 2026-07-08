@@ -106,9 +106,20 @@ fn json_string(s: &str) -> String {
     out
 }
 
+/// Build the QuickJS runtime config. We enable the event loop so `async`
+/// handlers work: `serve(async (req) => ...)` returns a promise, and without the
+/// event loop QuickJS reports "Pending jobs in the event queue" and traps after
+/// `_start`. `text_encoding` is enabled as a convenience (the shim is pure-JS and
+/// does not depend on it, but user code may reference TextEncoder/TextDecoder).
+fn kb_config() -> Config {
+    let mut config = Config::default();
+    config.event_loop(true).text_encoding(true);
+    config
+}
+
 #[export_name = "initialize-runtime"]
 pub extern "C" fn initialize_runtime() {
-    javy_plugin_api::initialize_runtime(Config::default, |runtime| {
+    javy_plugin_api::initialize_runtime(kb_config, |runtime| {
         runtime.context().with(|ctx| {
             let globals = ctx.globals();
 

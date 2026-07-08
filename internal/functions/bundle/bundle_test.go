@@ -44,6 +44,34 @@ func TestBundle_ResolvesSDKShimAndInlinesBridge(t *testing.T) {
 	}
 }
 
+// TestBundle_ShimIsQuickJSSafe guards against the shim (or a user's minimal
+// function using only the shim) referencing browser/Node globals that QuickJS —
+// the Javy runtime — does not provide. Referencing any of these (e.g. evaluating
+// `new TextEncoder()` at module scope) traps the module at boot, before it can
+// read the request. The shim must implement UTF-8 and base64 in pure JS.
+func TestBundle_ShimIsQuickJSSafe(t *testing.T) {
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "hello.ts")
+	if err := os.WriteFile(entry, []byte(sampleTS), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Bundle(entry)
+	if err != nil {
+		t.Fatalf("Bundle() error: %v", err)
+	}
+	js := string(res.JS)
+
+	// None of these identifiers may appear in the bundled shim output. (The SDK
+	// exposes its own `fetch` *function*, which routes through __kb_fetch; that is
+	// a definition, not a reference to the absent global, so it is not listed.)
+	forbidden := []string{"TextEncoder", "TextDecoder", "atob(", "btoa(", "Buffer", "crypto"}
+	for _, bad := range forbidden {
+		if strings.Contains(js, bad) {
+			t.Errorf("bundled shim references QuickJS-absent global %q; use pure-JS UTF-8/base64 instead", bad)
+		}
+	}
+}
+
 func TestBundle_MissingEntrypoint(t *testing.T) {
 	if _, err := Bundle(filepath.Join(t.TempDir(), "nope.ts")); err == nil {
 		t.Fatal("expected error for missing entrypoint")

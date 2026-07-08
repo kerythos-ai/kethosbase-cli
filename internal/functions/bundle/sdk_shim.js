@@ -48,15 +48,80 @@ function b64decode(str) {
   return new Uint8Array(out);
 }
 
-const enc = new TextEncoder();
-const dec = new TextDecoder();
+// Pure-JS UTF-8 encode/decode. QuickJS (the Javy runtime) does NOT provide
+// TextEncoder/TextDecoder/atob/btoa/Buffer/crypto — referencing any of them (even
+// `new TextEncoder()` at module scope) throws at boot. So we implement UTF-8 and
+// base64 by hand and touch no browser/Node global anywhere in this file.
+
+// utf8Encode(str) -> Uint8Array
+function utf8Encode(str) {
+  const out = [];
+  for (let i = 0; i < str.length; i++) {
+    let code = str.charCodeAt(i);
+    // Combine surrogate pairs into a single code point.
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < str.length) {
+      const next = str.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+        i++;
+      }
+    }
+    if (code < 0x80) {
+      out.push(code);
+    } else if (code < 0x800) {
+      out.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      out.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      out.push(
+        0xf0 | (code >> 18),
+        0x80 | ((code >> 12) & 0x3f),
+        0x80 | ((code >> 6) & 0x3f),
+        0x80 | (code & 0x3f)
+      );
+    }
+  }
+  return new Uint8Array(out);
+}
+
+// utf8Decode(Uint8Array) -> str
+function utf8Decode(bytes) {
+  let out = "";
+  let i = 0;
+  const n = bytes.length;
+  while (i < n) {
+    const b0 = bytes[i++];
+    let code;
+    if (b0 < 0x80) {
+      code = b0;
+    } else if ((b0 & 0xe0) === 0xc0) {
+      code = ((b0 & 0x1f) << 6) | (bytes[i++] & 0x3f);
+    } else if ((b0 & 0xf0) === 0xe0) {
+      code = ((b0 & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
+    } else {
+      code =
+        ((b0 & 0x07) << 18) |
+        ((bytes[i++] & 0x3f) << 12) |
+        ((bytes[i++] & 0x3f) << 6) |
+        (bytes[i++] & 0x3f);
+    }
+    if (code > 0xffff) {
+      // Emit as a surrogate pair.
+      code -= 0x10000;
+      out += String.fromCharCode(0xd800 + (code >> 10), 0xdc00 + (code & 0x3ff));
+    } else {
+      out += String.fromCharCode(code);
+    }
+  }
+  return out;
+}
 
 function toBytes(body) {
   if (body == null) return null;
   if (body instanceof Uint8Array) return body;
-  if (typeof body === "string") return enc.encode(body);
+  if (typeof body === "string") return utf8Encode(body);
   // Objects are JSON-encoded for convenience.
-  return enc.encode(JSON.stringify(body));
+  return utf8Encode(JSON.stringify(body));
 }
 
 // log(...args): append a line to the invocation log.
@@ -95,10 +160,10 @@ export async function fetch(url, init = {}) {
     headers: res.headers || {},
     body: res.body ? b64decode(res.body) : new Uint8Array(0),
     text() {
-      return dec.decode(this.body);
+      return utf8Decode(this.body);
     },
     json() {
-      return JSON.parse(dec.decode(this.body));
+      return JSON.parse(utf8Decode(this.body));
     },
   };
 }
@@ -133,10 +198,10 @@ export function serve(handler) {
         headers: env.headers || {},
         body: env.body ? b64decode(env.body) : new Uint8Array(0),
         text() {
-          return dec.decode(this.body);
+          return utf8Decode(this.body);
         },
         json() {
-          return JSON.parse(dec.decode(this.body));
+          return JSON.parse(utf8Decode(this.body));
         },
       };
     } catch (e) {
