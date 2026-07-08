@@ -76,23 +76,23 @@ type patchedAsset struct {
 var patchedJavyAssets = map[string]patchedAsset{
 	"linux/amd64": {
 		file:   "javy-patched-" + JavyVersion + "-x86_64-unknown-linux-gnu.gz",
-		sha256: "5ee5cb6172c0a21699bac873532de85f05a0322da48205b03b1b874042b52cbf",
+		sha256: "2a853c499294c9cfd78b4804f894b8007cd10ae7e5ce1336522c7d52c4adba48",
 	},
 	"linux/arm64": {
 		file:   "javy-patched-" + JavyVersion + "-aarch64-unknown-linux-gnu.gz",
-		sha256: "", // filled from the published linux/arm64 asset
+		sha256: "3ceb42e2cb381631b61ac2cd7336b8289b2e19cea7b33a24a8e465c9254543f8",
 	},
 	"darwin/amd64": {
 		file:   "javy-patched-" + JavyVersion + "-x86_64-apple-darwin.gz",
-		sha256: "", // pending CI (macos-13 runner)
+		sha256: "", // pending CI (macos-13 Intel runner still queued); reports "pending" until published
 	},
 	"darwin/arm64": {
 		file:   "javy-patched-" + JavyVersion + "-aarch64-apple-darwin.gz",
-		sha256: "", // pending CI (macos-latest runner)
+		sha256: "503ec672e31da4b990dd93dea62b665459bf7ad6596ce28477ec92e47cdc3625",
 	},
 	"windows/amd64": {
 		file:   "javy-patched-" + JavyVersion + "-x86_64-pc-windows-msvc.gz",
-		sha256: "", // pending CI (windows-latest runner)
+		sha256: "b52528a8003c750e7ba606428f10624c742754bcce33d62af90216a0be563fcb",
 	},
 }
 
