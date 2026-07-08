@@ -105,7 +105,8 @@ jobs:
       - name: Point bindgen at libclang (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: echo "LIBCLANG_PATH=${LLVM_PATH}/bin" >> "$GITHUB_ENV"
+        # /lib matched the known-good prior run (clang-sys also probes ../bin).
+        run: echo "LIBCLANG_PATH=${LLVM_PATH}/lib" >> "$GITHUB_ENV"
 
       - name: Clone and patch Javy ${{ env.JAVY_TAG }}
         shell: bash
