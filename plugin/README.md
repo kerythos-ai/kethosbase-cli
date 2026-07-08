@@ -51,13 +51,22 @@ converted to a `{"error":"..."}` JSON string so JS always gets valid JSON.
 The initialized plugin `.wasm` is a build artifact committed under
 `../internal/functions/javytool/build/plugin/kethosbase-plugin.wasm` (embedded
 via `go:embed`) so `functions deploy` never needs a Rust toolchain at runtime.
-Rebuild it only when this source or the pinned Javy version changes:
+
+It must be built with a **patched Javy** (Javy v9.0.0's `wasm-opt` runs with the
+MVP feature set and rejects the bulk-memory ops in wasi-libc/QuickJS). The
+reproducible container recipe in `javy-toolchain/` clones Javy, applies the
+one-line `.all_features()` patch to both `wasm-opt` call sites, builds the
+patched Javy, and runs `init-plugin` — no local Rust/Javy needed, just Docker:
 
 ```sh
-# Requires: rustup + `rustup target add wasm32-wasip1`, and the pinned javy CLI.
-./build.sh
+# From the repo root:
+docker run --rm -v "$PWD:/repo" -w /repo rust:1-bookworm \
+  bash plugin/javy-toolchain/build-javy-and-plugin.sh
+cp plugin/javy-toolchain/out/kethosbase-plugin.wasm \
+   internal/functions/javytool/build/plugin/kethosbase-plugin.wasm
 ```
 
-`build.sh` runs `cargo build --target=wasm32-wasip1 --release` and then
-`javy init-plugin` (the required validation/initialization step) to produce the
-final vendored `.wasm`, then writes its `.sha256` alongside.
+`build.sh` (local; requires rustup + a **patched** javy on PATH) is the
+non-container equivalent. See
+`../internal/functions/javytool/build/plugin/README.md` for the full rationale
+and the patched-Javy runtime requirement.

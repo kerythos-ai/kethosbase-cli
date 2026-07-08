@@ -52,9 +52,10 @@ WebAssembly module and uploads it via the management API. The pipeline is:
    package if present in `node_modules`, otherwise to a built-in shim.
 2. **Compile** the JS to `module.wasm` with [Javy](https://github.com/bytecodealliance/javy)
    (QuickJS-on-Wasm) plus a custom Kethosbase plugin that exposes the platform
-   host functions (`db`, `fetch`, `secret`, `log`) to the JS runtime. The pinned
-   Javy binary is downloaded on first use and verified against a SHA-256; the
-   plugin is vendored (see `/plugin`).
+   host functions (`db`, `fetch`, `secret`, `log`) to the JS runtime. Javy needs
+   a small one-line wasm-opt patch to accept bulk-memory output (see `/plugin`);
+   provide the patched binary via `KETHOSBASE_JAVY`. The plugin is vendored
+   (embedded) — no Rust toolchain needed at runtime.
 3. **Validate** that the module imports only `kethosbase` + `wasi_snapshot_preview1`
    and exports `_start` (matching the platform's deploy-time validator), and is
    under 8 MiB.

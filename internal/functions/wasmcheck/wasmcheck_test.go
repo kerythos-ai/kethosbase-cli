@@ -168,6 +168,54 @@ func TestValidate_RealWASIModule(t *testing.T) {
 	}
 }
 
+// TestValidate_RealJSFunction validates a module produced by the real pipeline:
+// a serve() handler in TypeScript, bundled and compiled to Wasm by (patched)
+// Javy + the Kethosbase plugin. This is the genuine artifact a customer deploys.
+func TestValidate_RealJSFunction(t *testing.T) {
+	wasm, err := readTestdata("sample-js-serve.wasm")
+	if err != nil {
+		t.Skipf("JS sample module unavailable: %v", err)
+	}
+	info, err := Validate(wasm)
+	if err != nil {
+		t.Fatalf("Validate(JS module) error: %v", err)
+	}
+	// Imports must be exactly the two allowed namespaces.
+	want := map[string]bool{"kethosbase": true, "wasi_snapshot_preview1": true}
+	if len(info.ImportModules) != len(want) {
+		t.Fatalf("import modules = %v, want %v", info.ImportModules, want)
+	}
+	for _, m := range info.ImportModules {
+		if !want[m] {
+			t.Errorf("JS module has disallowed import namespace %q", m)
+		}
+	}
+	// The plugin bridges every host function; a serve()+db+log handler should
+	// pull in at least the query/log/read imports.
+	got := map[string]bool{}
+	for _, im := range info.Imports {
+		if im.Module == "kethosbase" {
+			got[im.Name] = true
+		}
+	}
+	for _, fn := range []string{"kb_db_query", "kb_read", "kb_log"} {
+		if !got[fn] {
+			t.Errorf("expected kethosbase.%s import in JS module (got %v)", fn, keys(got))
+		}
+	}
+	if !info.HasExport("_start") {
+		t.Error("expected _start export")
+	}
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func readTestdata(name string) ([]byte, error) {
 	return os.ReadFile("testdata/" + name)
 }

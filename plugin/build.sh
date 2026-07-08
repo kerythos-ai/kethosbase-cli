@@ -3,11 +3,15 @@
 #
 # Prerequisites:
 #   - rustup with the wasm32-wasip1 target: `rustup target add wasm32-wasip1`
-#   - the pinned Javy CLI (v9.0.0) on PATH, or set JAVY to its path.
+#   - a PATCHED Javy CLI (v9.0.0 with .all_features() at both wasm-opt call
+#     sites) on PATH, or set JAVY to its path. Stock Javy's init-plugin rejects
+#     the bulk-memory output. Prefer the container recipe
+#     javy-toolchain/build-javy-and-plugin.sh, which builds the patched Javy and
+#     this artifact reproducibly with just Docker.
 #
-# Produces internal/functions/build/plugin/kethosbase-plugin.wasm and updates
-# its sha256. This is a one-time/occasional build step for maintainers; the
-# `functions deploy` command uses the committed artifact.
+# Produces internal/functions/javytool/build/plugin/kethosbase-plugin.wasm and
+# updates its sha256. Occasional maintainer step; `functions deploy` uses the
+# committed artifact.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

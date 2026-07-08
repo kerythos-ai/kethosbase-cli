@@ -1,13 +1,20 @@
-// Package javytool manages the pinned Javy CLI binary and the vendored
-// Kethosbase Javy plugin, and drives `javy build` to compile a bundled JS file
-// into a Wasm module.
+// Package javytool manages the Javy CLI binary and the vendored Kethosbase Javy
+// plugin, and drives `javy build` to compile a bundled JS file into a Wasm
+// module.
 //
-// The Javy binary is downloaded on first use from the Bytecode Alliance GitHub
-// release, verified against a pinned SHA-256, and cached under the user's home
-// (~/.kethosbase/tools). The plugin .wasm is vendored (embedded) in the binary
-// so no Rust toolchain is ever needed at runtime. Downloads are gzip; we verify
-// the checksum of the compressed asset (matching the checksums the Javy project
-// publishes) before decompressing.
+// IMPORTANT — a PATCHED Javy is required. Javy v9.0.0 runs binaryen `wasm-opt`
+// with the MVP feature set at both the plugin-initialization and the static
+// `build` steps, and rejects the bulk-memory instructions that wasi-libc /
+// QuickJS emit. We build a Javy patched to enable all wasm features at those two
+// wasm-opt call sites (see plugin/javy-toolchain). The vendored plugin was
+// produced with that patched Javy, and the static `build` step also needs it, so
+// the runtime binary must be the patched build too. Provide it via the
+// KETHOSBASE_JAVY environment variable (path to a patched `javy`); the stock
+// upstream binary will fail the static build with a bulk-memory validator error.
+//
+// The plugin .wasm is vendored (embedded) in the CLI so no Rust toolchain is
+// needed at runtime. When a Kethosbase-hosted patched-Javy release exists, the
+// download path below can be pointed at it (checksum-verified like any asset).
 package javytool
 
 import (
@@ -22,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -29,24 +37,24 @@ import (
 // The vendored plugin was built against this version; they must move together.
 const JavyVersion = "v9.0.0"
 
-const releaseBase = "https://github.com/bytecodealliance/javy/releases/download/" + JavyVersion
+// patchedJavyBaseURL, when set (via KETHOSBASE_JAVY_BASE_URL, or a future
+// baked-in default once Kethosbase hosts the assets), is the base URL a
+// gzipped, checksum-manifested patched-Javy binary is downloaded from. The stock
+// upstream Javy is intentionally NOT used — its MVP wasm-opt rejects our output.
+func patchedJavyBaseURL() string {
+	return os.Getenv("KETHOSBASE_JAVY_BASE_URL")
+}
 
-// asset describes a platform's Javy binary download and its pinned checksum.
-type asset struct {
+// patchedAsset describes a platform's patched-Javy download and its checksum.
+type patchedAsset struct {
 	file   string // release asset name (a gzipped binary)
 	sha256 string // sha256 of the gzipped asset
 }
 
-// javyAssets maps GOOS/GOARCH to the pinned release asset. Checksums are the
-// published .sha256 values for Javy v9.0.0.
-var javyAssets = map[string]asset{
-	"windows/amd64": {"javy-x86_64-windows-" + JavyVersion + ".gz", "8de6e4b90391c73c9c787043e111b9b2dd16d0ac677099dffd0d8b33dc839154"},
-	"windows/arm64": {"javy-arm-windows-" + JavyVersion + ".gz", "d53737c35ed702bd65d836ea8a237bf20f7f3a7a7bf2171b903fa6998a038a6a"},
-	"linux/amd64":   {"javy-x86_64-linux-" + JavyVersion + ".gz", "51a240468da9ebfebeb4292db635e2fab58ea01b9b81832001f780a05dbb744b"},
-	"linux/arm64":   {"javy-arm-linux-" + JavyVersion + ".gz", "1ec90c7ada039cab39e79d1377ad72bd80a20c9c07c714741568090fbb870b1a"},
-	"darwin/amd64":  {"javy-x86_64-macos-" + JavyVersion + ".gz", "7bb6a868e0fb9015814be67ed6df90fbbe5b515f1bc657e06412a2a4dd690987"},
-	"darwin/arm64":  {"javy-arm-macos-" + JavyVersion + ".gz", "86e4490a55f47c3fd76966e32edce1bec5e97c2e9d1627697fa8e840785fdd4c"},
-}
+// patchedJavyAssets maps GOOS/GOARCH to the Kethosbase-hosted patched-Javy
+// asset. Populate the checksums when the assets are published in CI (built by
+// plugin/javy-toolchain across the target matrix). Empty until then.
+var patchedJavyAssets = map[string]patchedAsset{}
 
 // Tool resolves and runs the pinned Javy CLI.
 type Tool struct {
@@ -99,10 +107,17 @@ func toolsDir() (string, error) {
 	return filepath.Join(home, ".kethosbase", "tools"), nil
 }
 
-// ensureBinary returns the path to the pinned Javy binary, downloading and
-// verifying it if it is not already cached. Set KETHOSBASE_JAVY to use a local
-// javy binary (e.g. for maintainers or air-gapped builds); no checksum is
-// enforced on an explicitly provided binary.
+// ensureBinary returns the path to a PATCHED Javy binary. Resolution order:
+//
+//  1. KETHOSBASE_JAVY — an explicit path to a patched `javy` (no checksum
+//     enforced; the operator vouches for it). This is the supported path today.
+//  2. A cached patched binary previously placed in ~/.kethosbase/tools.
+//
+// A Kethosbase-hosted, checksum-verified patched-Javy release is the intended
+// future default (downloadVerifyGunzip + patchedJavyAssets are ready for it);
+// until those assets exist we do NOT fall back to the stock upstream binary,
+// because the stock `javy build` rejects the bulk-memory output with a MVP
+// wasm-opt validator error and would mislead the user.
 func ensureBinary() (string, error) {
 	if override := os.Getenv("KETHOSBASE_JAVY"); override != "" {
 		if _, err := os.Stat(override); err != nil {
@@ -111,38 +126,46 @@ func ensureBinary() (string, error) {
 		return override, nil
 	}
 
-	key := runtime.GOOS + "/" + runtime.GOARCH
-	a, ok := javyAssets[key]
-	if !ok {
-		return "", fmt.Errorf("no pinned Javy binary for %s; set KETHOSBASE_JAVY to a local javy %s binary", key, JavyVersion)
-	}
-
 	dir, err := toolsDir()
 	if err != nil {
 		return "", err
 	}
-	name := "javy-" + JavyVersion
+	name := "javy-patched-" + JavyVersion
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
 	dst := filepath.Join(dir, name)
 	if _, err := os.Stat(dst); err == nil {
-		return dst, nil // already cached
+		return dst, nil // previously provisioned
 	}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	url := releaseBase + "/" + a.file
-	if err := downloadVerifyGunzip(url, a.sha256, dst); err != nil {
-		return "", fmt.Errorf("download Javy %s: %w", JavyVersion, err)
-	}
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(dst, 0o755); err != nil {
-			return "", err
+	// If a patched-Javy release is configured, download+verify it (checksum
+	// enforced before the binary is written).
+	key := runtime.GOOS + "/" + runtime.GOARCH
+	if base := patchedJavyBaseURL(); base != "" {
+		if a, ok := patchedJavyAssets[key]; ok && a.sha256 != "" {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return "", err
+			}
+			url := strings.TrimRight(base, "/") + "/" + a.file
+			if err := downloadVerifyGunzip(url, a.sha256, dst); err != nil {
+				return "", fmt.Errorf("download patched Javy: %w", err)
+			}
+			if runtime.GOOS != "windows" {
+				if err := os.Chmod(dst, 0o755); err != nil {
+					return "", err
+				}
+			}
+			return dst, nil
 		}
 	}
-	return dst, nil
+
+	return "", fmt.Errorf(
+		"no patched Javy available for %s.\n"+
+			"Javy %s needs a small wasm-opt patch (enable all wasm features) to compile\n"+
+			"Functions; build one with plugin/javy-toolchain/build-javy-and-plugin.sh and\n"+
+			"point KETHOSBASE_JAVY at it, or drop it at %s.",
+		key, JavyVersion, dst)
 }
 
 // downloadVerifyGunzip fetches a gzipped asset, verifies the gzip bytes against
