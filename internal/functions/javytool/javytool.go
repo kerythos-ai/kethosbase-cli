@@ -57,11 +57,13 @@ type Tool struct {
 // Ensure resolves the Javy binary (downloading+verifying on first use unless
 // KETHOSBASE_JAVY overrides it) and materializes the vendored plugin to disk.
 func Ensure() (*Tool, error) {
-	bin, err := ensureBinary()
+	// Materialize the vendored plugin first: it is cheap and, if missing, avoids
+	// a pointless Javy download.
+	plugin, err := ensurePlugin()
 	if err != nil {
 		return nil, err
 	}
-	plugin, err := ensurePlugin()
+	bin, err := ensureBinary()
 	if err != nil {
 		return nil, err
 	}
