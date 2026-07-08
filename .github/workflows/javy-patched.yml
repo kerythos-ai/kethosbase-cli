@@ -1,0 +1,154 @@
+name: build-patched-javy
+
+# Builds the PATCHED Javy CLI on native runners for every platform the CLI
+# supports, and publishes each binary (+ .sha256) as an asset on a dedicated
+# GitHub Release. `kethosbase functions deploy` downloads the matching binary at
+# runtime (checksum-verified) so end users need no local Rust/Javy toolchain.
+#
+# WHY A PATCH: Javy v9.0.0 runs binaryen wasm-opt with the MVP feature set at
+# BOTH the plugin-initialization step (crates/plugin-processing) and the static
+# `build` step (crates/codegen), and rejects the bulk-memory ops that
+# wasi-libc / QuickJS emit. plugin/javy-toolchain/patch-javy.py adds
+# `.all_features()` to both wasm-opt call sites.
+#
+# Trigger: manually (workflow_dispatch) or by pushing the release tag.
+# The release tag is derived from JAVY_TAG below (javy-patched-<JAVY_TAG>) and
+# must match javytool.JavyVersion in the CLI.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "javy-patched-v*"
+
+permissions:
+  contents: write
+
+env:
+  JAVY_TAG: v9.0.0
+  RELEASE_TAG: javy-patched-v9.0.0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13 # amd64
+            target: x86_64-apple-darwin
+          - os: macos-latest # arm64
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust + wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      # libclang is needed by rquickjs-sys's bindgen (host side). rquickjs-sys
+      # downloads its OWN WASI SDK for the wasm32-wasip1 C compile, so we must NOT
+      # export CC/CFLAGS/CPATH that would hijack that compile — only point bindgen
+      # at a libclang. Provide it per-OS in the way that avoids the
+      # install-llvm-action pitfalls that broke the earlier run:
+      #   - ubuntu: install-llvm-action's LLVM needs libtinfo.so.5 (absent on
+      #     ubuntu-24.04) → use distro clang/libclang instead (mirrors the working
+      #     rust:1-bookworm Docker recipe).
+      #   - macOS: use the libclang bundled with Xcode; do NOT install a second
+      #     LLVM (its env leaks into the wasi-sdk clang and breaks the wasm build).
+      #   - windows: install-llvm-action (worked in the prior run) provides
+      #     libclang.dll; its env does not affect the MSVC-host wasm build.
+      - name: Install libclang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang libclang-dev llvm-dev
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
+
+      - name: Locate libclang (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Apple clang ships libclang under the active Xcode/CLT toolchain.
+          # Do NOT install a second LLVM here: install-llvm-action leaks
+          # CPATH/DYLD_LIBRARY_PATH into rquickjs-sys's downloaded wasi-sdk clang
+          # and breaks the wasm compile ("no targets are registered").
+          dev="$(xcode-select -p)"
+          for cand in \
+            "$dev/Toolchains/XcodeDefault.xctoolchain/usr/lib" \
+            "$dev/usr/lib"; do
+            if ls "$cand"/libclang.dylib >/dev/null 2>&1; then
+              echo "LIBCLANG_PATH=$cand" >> "$GITHUB_ENV"
+              echo "using libclang at $cand"
+              exit 0
+            fi
+          done
+          echo "libclang.dylib not found under $dev" >&2
+          exit 1
+
+      # Windows has no standalone LLVM preinstalled; install-llvm-action worked
+      # here in the prior run (only the Linux/macOS legs failed with it), and its
+      # CC/CFLAGS leakage does not affect the MSVC-host wasm build. It sets
+      # LLVM_PATH; bindgen finds libclang via that.
+      - name: Install LLVM (Windows)
+        if: runner.os == 'Windows'
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18"
+
+      - name: Point bindgen at libclang (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        # /lib matched the known-good prior run (clang-sys also probes ../bin).
+        run: echo "LIBCLANG_PATH=${LLVM_PATH}/lib" >> "$GITHUB_ENV"
+
+      - name: Clone and patch Javy ${{ env.JAVY_TAG }}
+        shell: bash
+        run: |
+          git clone --depth 1 --branch "$JAVY_TAG" \
+            https://github.com/bytecodealliance/javy.git javy-src
+          python3 plugin/javy-toolchain/patch-javy.py javy-src
+
+      - name: Build patched Javy
+        shell: bash
+        run: |
+          cd javy-src
+          # The CLI build script embeds the default plugin, so build it first.
+          cargo build --release --target=wasm32-wasip1 -p javy-plugin
+          cargo build --release -p javy-cli --bin javy
+          ./target/release/javy --version || ./target/release/javy.exe --version
+
+      - name: Package asset (gzip + sha256)
+        shell: bash
+        run: |
+          mkdir -p dist
+          bin="javy-src/target/release/javy"
+          [ -f "$bin" ] || bin="javy-src/target/release/javy.exe"
+          asset="dist/javy-patched-${JAVY_TAG}-${{ matrix.target }}.gz"
+          gzip -c "$bin" > "$asset"
+          # sha256 of the gzipped asset (matches the CLI's verify-before-gunzip).
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$asset" | awk '{print $1}' > "$asset.sha256"
+          else
+            shasum -a 256 "$asset" | awk '{print $1}' > "$asset.sha256"
+          fi
+          echo "asset=$asset"; cat "$asset.sha256"
+
+      - name: Upload to release ${{ env.RELEASE_TAG }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Patched Javy ${{ env.JAVY_TAG }}
+          body: |
+            Patched Javy ${{ env.JAVY_TAG }} for Kethosbase Functions
+            (enables all wasm-opt features so bulk-memory output is accepted).
+            Downloaded automatically by `kethosbase functions deploy`.
+          files: |
+            dist/javy-patched-${{ env.JAVY_TAG }}-${{ matrix.target }}.gz
+            dist/javy-patched-${{ env.JAVY_TAG }}-${{ matrix.target }}.gz.sha256
