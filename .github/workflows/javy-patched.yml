@@ -38,8 +38,9 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          - os: macos-13 # amd64
+          - os: macos-latest # arm64 host; cross-compiles the Intel target
             target: x86_64-apple-darwin
+            cross: true
           - os: macos-latest # arm64
             target: aarch64-apple-darwin
           - os: windows-latest
@@ -51,7 +52,9 @@ jobs:
       - name: Install Rust + wasm target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-wasip1
+          # matrix.target adds the cross target (x86_64-apple-darwin on the arm64
+          # macOS host); for native legs it's the host triple — a harmless no-op.
+          targets: wasm32-wasip1,${{ matrix.target }}
 
       # libclang is needed by rquickjs-sys's bindgen (host side). rquickjs-sys
       # downloads its OWN WASI SDK for the wasm32-wasip1 C compile, so we must NOT
@@ -121,17 +124,26 @@ jobs:
           cd javy-src
           # The CLI build script embeds the default plugin, so build it first.
           cargo build --release --target=wasm32-wasip1 -p javy-plugin
-          cargo build --release -p javy-cli --bin javy
-          ./target/release/javy --version || ./target/release/javy.exe --version
+          # Always build with an explicit --target so the output path is uniform
+          # across native and cross legs (target/<triple>/release).
+          cargo build --release --target="${{ matrix.target }}" -p javy-cli --bin javy
+          # A cross-built binary (Intel on an arm64 host) can't execute here — skip
+          # its smoke check; native targets still self-verify.
+          if [ "${{ matrix.cross }}" != "true" ]; then
+            "./target/${{ matrix.target }}/release/javy" --version \
+              || "./target/${{ matrix.target }}/release/javy.exe" --version
+          fi
 
       - name: Package asset (gzip + sha256)
         shell: bash
         run: |
           mkdir -p dist
-          bin="javy-src/target/release/javy"
-          [ -f "$bin" ] || bin="javy-src/target/release/javy.exe"
+          bin="javy-src/target/${{ matrix.target }}/release/javy"
+          [ -f "$bin" ] || bin="javy-src/target/${{ matrix.target }}/release/javy.exe"
           asset="dist/javy-patched-${JAVY_TAG}-${{ matrix.target }}.gz"
-          gzip -c "$bin" > "$asset"
+          # -n omits the mtime/name header so the gzip is reproducible (stable
+          # sha256 across rebuilds of an identical binary).
+          gzip -nc "$bin" > "$asset"
           # sha256 of the gzipped asset (matches the CLI's verify-before-gunzip).
           if command -v sha256sum >/dev/null; then
             sha256sum "$asset" | awk '{print $1}' > "$asset.sha256"
