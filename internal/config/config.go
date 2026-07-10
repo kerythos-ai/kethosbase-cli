@@ -25,6 +25,9 @@ type Project struct {
 	Ref           string `json:"ref"`
 	APIURL        string `json:"api_url,omitempty"`
 	MigrationsDir string `json:"migrations_dir,omitempty"`
+	// SchemaDir holds the declared .sql schema files that `db diff` treats as the
+	// source of truth (default: ./schema).
+	SchemaDir string `json:"schema_dir,omitempty"`
 }
 
 // LoadProject reads ./kethosbase.json from dir. It returns (nil, nil) when the
