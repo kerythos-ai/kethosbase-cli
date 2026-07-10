@@ -61,6 +61,67 @@ func Discover(dir string) ([]Migration, error) {
 	return migs, nil
 }
 
+// NextFilename returns a migration file name that sorts after every existing
+// *.sql file in dir, using the same zero-padded numeric convention the runner
+// discovers (e.g. 0003_<slug>.sql after 0001_… and 0002_…). It only reads names,
+// so a missing dir simply yields 0001_<slug>.sql. The slug is sanitised to
+// [a-z0-9_]; an empty slug falls back to "migration".
+func NextFilename(dir, slug string) string {
+	slug = sanitiseSlug(slug)
+	next := 1
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+				continue
+			}
+			name := strings.TrimSuffix(e.Name(), ".sql")
+			num := leadingNumber(name)
+			if num >= next {
+				next = num + 1
+			}
+		}
+	}
+	return fmt.Sprintf("%04d_%s.sql", next, slug)
+}
+
+func leadingNumber(name string) int {
+	end := 0
+	for end < len(name) && name[end] >= '0' && name[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0
+	}
+	n := 0
+	for _, r := range name[:end] {
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+func sanitiseSlug(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	prevUnderscore := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevUnderscore = false
+		case r == '_' || r == '-' || r == ' ':
+			if !prevUnderscore && b.Len() > 0 {
+				b.WriteByte('_')
+				prevUnderscore = true
+			}
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "migration"
+	}
+	return out
+}
+
 // Status is the applied/pending split for the linked database.
 type Status struct {
 	Applied []string // versions already in the ledger, in order

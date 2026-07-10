@@ -30,12 +30,18 @@ kethosbase migrate up                 # apply all pending .sql files in ./migrat
 kethosbase migrate status             # show applied vs pending
 kethosbase migrate up --dir packages/db/migrations
 
-# 4. Generate TypeScript types from the live schema
+# 4. Declarative schema: diff your ./schema/*.sql against the live database
+kethosbase db diff                    # print the reconciling migration (dry run)
+kethosbase db diff --write            # save it as the next ./migrations file
+kethosbase db diff --apply            # save it and run it (prompts to confirm)
+kethosbase db diff --allow-drops      # also emit DROP TABLE / DROP COLUMN
+
+# 5. Generate TypeScript types from the live schema
 kethosbase gen types                  # prints to stdout
 kethosbase gen types -o src/database.types.ts
 kethosbase gen types --schema public --db-url "postgres://…"
 
-# 5. Deploy an Edge Function written in TypeScript/JavaScript
+# 6. Deploy an Edge Function written in TypeScript/JavaScript
 kethosbase functions deploy src/hello.ts            # name defaults to "hello"
 kethosbase functions deploy src/hello.ts --name greet --project abcdefghijklmnop
 kethosbase functions deploy src/hello.ts --dry-run -o hello.wasm   # build only
@@ -85,6 +91,17 @@ the shared bridge contract with `@kethosbase/functions`.
   `kethosbase_migrations` ledger table. Re-runs are idempotent; an applied file
   that changes on disk is rejected (checksum drift) — never edit an applied
   migration, add a new one.
+- **`db diff`** → the declarative-schema workflow. You keep the desired schema as
+  `*.sql` files in `./schema` (the source of truth); `db diff` introspects the
+  live database, computes the difference, and emits a migration that reconciles
+  it. Default is a dry run to stdout; `--write` saves it as the next
+  `NNNN_<name>.sql` migration; `--apply` saves and runs it (with confirmation).
+  It covers **tables, columns (type/nullability) and enums** — a subset of DDL.
+  It does **not** diff primary keys, foreign keys, indexes, constraints, default
+  expressions, renames, views, functions, triggers, RLS or grants; destructive
+  drops are emitted only with `--allow-drops`. See
+  [docs/design/declarative-schemas.md](docs/design/declarative-schemas.md) for
+  the full coverage and limitations.
 - **`gen types`** → introspects the schema (tables, columns, enums) and emits a
   Supabase-shaped `Database` TypeScript type (per-table `Row`/`Insert`/`Update`
   plus an `Enums` map and named enum unions). Insert fields are optional when the
@@ -94,7 +111,7 @@ the shared bridge contract with `@kethosbase/functions`.
 
 | What | Where | Secret? |
 |------|-------|---------|
-| Project link (`ref`, `api_url`, `migrations_dir`) | `./kethosbase.json` | no — commit it |
+| Project link (`ref`, `api_url`, `migrations_dir`, `schema_dir`) | `./kethosbase.json` | no — commit it |
 | Session token + per-project DB connection string | `~/.kethosbase/credentials.json` (0600) | yes — never commit |
 
 `migrate` resolves the database URL in this order: `--db-url` flag →

@@ -35,7 +35,7 @@ about the product surface).
 
 - `main.go` → `cli.Execute()`.
 - `internal/cli/` — cobra commands: `root.go`, `login.go`, `link.go`, `migrate.go`,
-  `gen.go`, `functions.go`.
+  `db.go`, `gen.go`, `functions.go`.
 - `internal/functions/` — the `functions deploy` pipeline: `bundle/` (esbuild +
   the `@kethosbase/functions` SDK shim), `javytool/` (pinned Javy download +
   vendored plugin + `javy build`), `wasmcheck/` (parses a module's imports/exports
@@ -52,6 +52,12 @@ about the product surface).
   applies each in its own tx, records in a `kethosbase_migrations` ledger with a
   sha256 checksum; rejects an applied file that later changes (drift).
 - `internal/introspect/` — reads tables/columns/enums from a schema (pgx).
+- `internal/schema/` — declarative-schema engine behind `db diff`: an in-house
+  restricted DDL parser (`CREATE TABLE` / `CREATE TYPE … AS ENUM`) that produces
+  the *same* model as introspection, a pure `Compute(desired, current)` diff
+  (tables/columns/enums — a subset; no keys/indexes/constraints/defaults), and a
+  migration renderer. See `docs/design/declarative-schemas.md` for coverage +
+  limitations.
 - `internal/gen/` — renders an introspected schema to TypeScript (Supabase-shaped
   `Database`: per-table Row/Insert/Update + Enums + named enum unions).
 
