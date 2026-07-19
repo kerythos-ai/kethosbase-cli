@@ -5,12 +5,19 @@
 // this shim so `functions deploy` works end-to-end. It implements EXACTLY the
 // shared bridge contract: it only ever touches the plugin-provided globals
 // __kb_read_request / __kb_write_response / __kb_log / __kb_db_query /
-// __kb_fetch / __kb_get_secret. It never touches raw stdio.
+// __kb_fetch / __kb_get_secret / __kb_sign. It never touches raw stdio.
 //
 // When the real @kethosbase/functions package is present in node_modules the
 // bundler uses that instead; keep this shim's public surface a subset of it.
+//
+// TEMPORARILY NOT A SUBSET: `crypto` (crypto.subtle.sign) and `keyFromSecret`
+// below land here first. Until @kethosbase/functions ships the same two exports
+// with identical semantics, a project that has the npm package installed gets a
+// NARROWER runtime than one that falls back to this shim — signing code written
+// against the shim breaks on `npm i @kethosbase/functions`. Mirror them in
+// kethosbase-js/packages/functions before advertising signing in the docs.
 
-/* global __kb_read_request, __kb_write_response, __kb_log, __kb_db_query, __kb_fetch, __kb_get_secret */
+/* global __kb_read_request, __kb_write_response, __kb_log, __kb_db_query, __kb_fetch, __kb_get_secret, __kb_sign */
 
 function b64encode(bytes) {
   // bytes: Uint8Array -> base64 string.
@@ -176,6 +183,124 @@ export function secret(name) {
   return res.value;
 }
 
+// ---- signing (ADR-0126) ---------------------------------------------------
+//
+// The private key NEVER enters this runtime. keyFromSecret(name) returns an
+// opaque, CryptoKey-LIKE handle carrying only the NAME of the Function secret
+// that holds the PEM; the host unseals that secret, parses the PEM and signs in
+// HOST memory, so key material never reaches WASM linear memory. There is
+// deliberately no importKey()/key-by-value path — adding one would defeat the
+// isolation the whole host ABI is built around.
+
+const KB_SECRET_NAME = "__kbSecretName";
+
+// keyFromSecret(name): an opaque handle naming the Function secret that holds a
+// PEM private key. Pass it as the `key` argument to crypto.subtle.sign().
+export function keyFromSecret(name) {
+  if (typeof name !== "string" || name === "") {
+    throw new Error(
+      "keyFromSecret: expected the name of a Function secret holding a PEM private key"
+    );
+  }
+  return {
+    type: "private",
+    extractable: false,
+    usages: ["sign"],
+    [KB_SECRET_NAME]: name,
+  };
+}
+
+function hashName(h) {
+  if (typeof h === "string") return h;
+  if (h && typeof h.name === "string") return h.name;
+  return undefined;
+}
+
+// Map a WebCrypto algorithm to the host's `alg`. Unsupported inputs throw here,
+// before anything is sent to the host — never silently default.
+function toHostAlg(algorithm) {
+  const name = typeof algorithm === "string" ? algorithm : algorithm && algorithm.name;
+  const hash = typeof algorithm === "string" ? undefined : hashName(algorithm && algorithm.hash);
+  if (name === "RSASSA-PKCS1-v1_5") {
+    // For RSASSA-PKCS1-v1_5 WebCrypto carries the hash on the key, so `hash` is
+    // optional here; if it is given it must be SHA-256.
+    if (hash !== undefined && hash !== "SHA-256") {
+      throw new Error(
+        'crypto.subtle.sign: RSASSA-PKCS1-v1_5 supports only SHA-256, got "' + hash + '"'
+      );
+    }
+    return "RS256";
+  }
+  if (name === "ECDSA") {
+    if (hash !== "SHA-256") {
+      throw new Error(
+        'crypto.subtle.sign: ECDSA requires hash "SHA-256" on a P-256 key (ES256), got "' +
+          String(hash) +
+          '"'
+      );
+    }
+    return "ES256";
+  }
+  throw new Error(
+    "crypto.subtle.sign: unsupported algorithm " +
+      JSON.stringify(name === undefined ? algorithm : name) +
+      ' (supported: {name:"RSASSA-PKCS1-v1_5"} for RS256, {name:"ECDSA",hash:"SHA-256"} for ES256)'
+  );
+}
+
+function secretNameFromKey(key) {
+  // Reject raw key material outright: transporting a private key through JS
+  // would put it in WASM memory, which is exactly what this design prevents.
+  if (typeof key === "string" || key instanceof ArrayBuffer || ArrayBuffer.isView(key)) {
+    throw new Error(
+      "crypto.subtle.sign: raw key material is not accepted — a private key must never " +
+        'enter the Function runtime. Store the PEM as a Function secret and pass keyFromSecret("SECRET_NAME").'
+    );
+  }
+  const name = key && key[KB_SECRET_NAME];
+  if (typeof name !== "string" || name === "") {
+    throw new Error(
+      'crypto.subtle.sign: key must be a handle from keyFromSecret("SECRET_NAME")'
+    );
+  }
+  return name;
+}
+
+function toSignBytes(data) {
+  if (data instanceof Uint8Array) return data;
+  if (typeof data === "string") return utf8Encode(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  throw new Error("crypto.subtle.sign: data must be a string, ArrayBuffer, or typed array");
+}
+
+// crypto.subtle.sign(algorithm, key, data) -> Promise<ArrayBuffer>
+//
+// A deliberately partial WebCrypto surface: sign() only, over the host's RS256
+// and ES256. ES256 signatures come back as fixed-width r||s (the JWS encoding),
+// not ASN.1 DER, so they are passed through unchanged.
+export const crypto = {
+  subtle: {
+    async sign(algorithm, key, data) {
+      const alg = toHostAlg(algorithm);
+      const keyName = secretNameFromKey(key);
+      const bytes = toSignBytes(data);
+      const staged = __kb_sign(JSON.stringify({ alg, key: keyName, data: b64encode(bytes) }));
+      let res;
+      try {
+        res = JSON.parse(staged);
+      } catch (e) {
+        throw new Error("crypto.subtle.sign: host returned malformed JSON");
+      }
+      if (res.error) throw new Error("crypto.subtle.sign: " + res.error);
+      if (typeof res.signature !== "string") {
+        throw new Error("crypto.subtle.sign: host returned no signature");
+      }
+      return b64decode(res.signature).buffer;
+    },
+  },
+};
+
 // serve(handler): read the request envelope, invoke handler(req), and write the
 // response envelope. handler may be sync or async and returns a Response-like
 // object { status, headers?, body? } (body: string | Uint8Array | object).
@@ -230,4 +355,4 @@ function writeResponse(res) {
   __kb_write_response(JSON.stringify(env));
 }
 
-export default { serve, db, fetch, secret, log };
+export default { serve, db, fetch, secret, log, crypto, keyFromSecret };
