@@ -1,7 +1,7 @@
 # Kethosbase Javy plugin — WASI preview 1.
 #
 # This crate compiles to a Javy *plugin* Wasm module. The plugin embeds the
-# QuickJS runtime and installs six global functions (`__kb_*`) that the
+# QuickJS runtime and installs seven global functions (`__kb_*`) that the
 # `@kethosbase/functions` SDK calls. Each global marshals strings in/out of the
 # plugin's linear memory and forwards to the platform host functions imported
 # from the Wasm module namespace `kethosbase` (see `src/lib.rs`).
@@ -9,7 +9,7 @@
 # Build (produces the *raw* plugin; must then be run through `javy init-plugin`):
 #   cargo build --target=wasm32-wasip1 --release
 #   javy init-plugin target/wasm32-wasip1/release/kethosbase_javy_plugin.wasm \
-#       -o ../internal/functions/build/plugin/kethosbase-plugin.wasm
+#       -o ../internal/functions/javytool/build/plugin/kethosbase-plugin.wasm
 #
 # Pinned to Javy CLI v9.0.0 (javy-plugin-api v7). See ADR-0091.
 

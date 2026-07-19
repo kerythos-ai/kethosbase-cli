@@ -2,7 +2,7 @@
 //!
 //! A Javy plugin embeds a QuickJS runtime into a Wasm module. By default that
 //! runtime can only touch stdio (via `Javy.IO`). This plugin additionally
-//! installs six global functions into the JS runtime — the *shared bridge
+//! installs seven global functions into the JS runtime — the *shared bridge
 //! contract* the `@kethosbase/functions` SDK (kethosbase-js repo) depends on:
 //!
 //!   __kb_read_request(): string             — read the request envelope JSON
@@ -11,12 +11,14 @@
 //!   __kb_db_query(reqJson: string): string  — returns staged result JSON
 //!   __kb_fetch(reqJson: string): string     — returns staged result JSON
 //!   __kb_get_secret(name: string): string   — returns staged result JSON
+//!   __kb_sign(reqJson: string): string      — returns staged result JSON
 //!
 //! `__kb_read_request` / `__kb_write_response` own the module's stdin/stdout so
-//! the JS never touches raw WASI stdio directly. The other four forward to the
+//! the JS never touches raw WASI stdio directly. The other five forward to the
 //! platform host functions imported from the Wasm module namespace `kethosbase`
-//! (host ABI defined by ADR-0084 / ADR-0089), marshalling strings through the
-//! plugin's own linear memory and following the one-buffer staging protocol.
+//! (host ABI defined by ADR-0084 / ADR-0089 / ADR-0126), marshalling strings
+//! through the plugin's own linear memory and following the one-buffer staging
+//! protocol.
 //!
 //! Because a Javy-generated module dynamically links against this plugin and
 //! shares its linear memory, the `(ptr,len)` pairs we hand the host point into
@@ -46,6 +48,9 @@ extern "C" {
     fn kb_db_query(ptr: *const u8, len: u32) -> i32;
     fn kb_fetch(ptr: *const u8, len: u32) -> i32;
     fn kb_get_secret(ptr: *const u8, len: u32) -> i32;
+    // kb_sign signs with a private key held by the HOST (ADR-0126). The request
+    // names the vault secret holding the PEM; key bytes never enter this module.
+    fn kb_sign(ptr: *const u8, len: u32) -> i32;
     // kb_read(dst, len) -> n: drain up to len staged bytes into [dst,len),
     // returning bytes copied (may chunk over calls) or -1.
     fn kb_read(dst: *mut u8, len: u32) -> i32;
@@ -178,6 +183,13 @@ pub extern "C" fn initialize_runtime() {
                 .set(
                     "__kb_get_secret",
                     Func::from(|name: String| -> String { call_producer(kb_get_secret, &name) }),
+                )
+                .unwrap();
+
+            globals
+                .set(
+                    "__kb_sign",
+                    Func::from(|req: String| -> String { call_producer(kb_sign, &req) }),
                 )
                 .unwrap();
         });

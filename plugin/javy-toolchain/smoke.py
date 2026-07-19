@@ -74,6 +74,13 @@ def kb_fetch(ptr, length):
 def kb_get_secret(ptr, length):
     return stage({"value": "smoke-secret"})
 
+def kb_sign(ptr, length):
+    req = json.loads(read_str(ptr, length))
+    sys.stderr.write("[kb_sign] alg=" + str(req.get("alg")) + " key=" + str(req.get("key")) + "\n")
+    # A stand-in signature: the real host signs in host memory with the PEM held
+    # by the named secret. 64 bytes matches an ES256 r||s signature.
+    return stage({"signature": base64.b64encode(b"\x01" * 64).decode()})
+
 def kb_read(dst, length):
     m = mem_holder["mem"]
     remaining = staged["buf"][staged["off"]:]
@@ -87,6 +94,7 @@ linker.define_func("kethosbase", "kb_log", FuncType([i32, i32], []), kb_log)
 linker.define_func("kethosbase", "kb_db_query", FuncType([i32, i32], [i32]), kb_db_query)
 linker.define_func("kethosbase", "kb_fetch", FuncType([i32, i32], [i32]), kb_fetch)
 linker.define_func("kethosbase", "kb_get_secret", FuncType([i32, i32], [i32]), kb_get_secret)
+linker.define_func("kethosbase", "kb_sign", FuncType([i32, i32], [i32]), kb_sign)
 linker.define_func("kethosbase", "kb_read", FuncType([i32, i32], [i32]), kb_read)
 # Alias export kb_db_read has identical behavior.
 linker.define_func("kethosbase", "kb_db_read", FuncType([i32, i32], [i32]), kb_read)
