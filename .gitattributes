@@ -1,0 +1,11 @@
+# Scripts that are executed inside Linux containers (the patched-Javy plugin
+# build in plugin/javy-toolchain/) must keep LF endings in the WORKING TREE, not
+# just in the object store. With core.autocrlf=true on Windows they otherwise
+# check out CRLF and the container's bash fails on `set -euo pipefail\r` with
+# "set: pipefail: invalid option name", making the documented Docker build
+# recipe impossible to run from a Windows checkout.
+*.sh text eol=lf
+*.py text eol=lf
+
+# The vendored Javy plugin artifact is binary; never touch its bytes.
+*.wasm binary

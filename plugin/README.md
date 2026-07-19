@@ -41,10 +41,24 @@ SDK depends on them verbatim):
 | `__kb_db_query(reqJson)` | `(string): string` | host `kb_db_query` + `kb_read` |
 | `__kb_fetch(reqJson)` | `(string): string` | host `kb_fetch` + `kb_read` |
 | `__kb_get_secret(name)` | `(string): string` | host `kb_get_secret` + `kb_read` |
+| `__kb_sign(reqJson)` | `(string): string` | host `kb_sign` + `kb_read` |
 
 Producers stage a result and return its length; the plugin then drains it with
 `kb_read` and returns the JSON string to JS. Host framing errors (`-1`) are
 converted to a `{"error":"..."}` JSON string so JS always gets valid JSON.
+
+`__kb_sign` (ADR-0126) takes `{"alg":"RS256"|"ES256","key":"<secret name>",
+"data":"<base64>"}` and stages `{"signature":"<base64>"}` or `{"error":"..."}`.
+Note `key` is the **name** of a Function secret holding a PEM private key, never
+key material: the host unseals the secret and signs in host memory, so the
+private key never enters this module's linear memory. The plugin must not grow a
+key-by-value path.
+
+**Deployment ordering:** the `kethosbase.kb_sign` import is emitted
+unconditionally by every module built with this plugin, and wazero refuses to
+instantiate a module with an unsatisfied import. A host without `kb_sign` would
+therefore fail *every* JS function, not just signing ones. Ship the host side
+first, then this artifact.
 
 ## Building the vendored plugin artifact
 
