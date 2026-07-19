@@ -21,7 +21,19 @@ Two runtime requirements are baked into this plugin (`plugin/src/lib.rs`):
 - **QuickJS-safe SDK**: QuickJS provides no `TextEncoder`/`TextDecoder`/`atob`/
   `btoa`/`Buffer`/`crypto`. The embedded `sdk_shim.js` implements UTF-8 + base64
   in pure JS (a Go test enforces this). `text_encoding(true)` is also enabled so
-  user code that references `TextEncoder`/`TextDecoder` still works.
+  user code that references `TextEncoder`/`TextDecoder` still works. Note the SDK
+  *exports* its own `crypto` (a partial `crypto.subtle.sign` routed through
+  `__kb_sign`, ADR-0126) exactly as it exports its own `fetch` — that is a shim
+  definition, not a read of the absent QuickJS global.
+
+## Import-set changes are breaking
+
+Every module built with this plugin imports the full `kethosbase` set the plugin
+declares, whether or not the JS uses it — including `kb_sign` as of ADR-0126.
+wazero refuses to instantiate a module with an unsatisfied import, so a plugin
+that imports a host function the platform does not export breaks **every** JS
+function, not just the ones using it. Always ship the host side first, then this
+artifact.
 
 ## Why a patched Javy is needed
 
