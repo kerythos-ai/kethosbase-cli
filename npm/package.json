@@ -1,6 +1,6 @@
 {
   "name": "@kethosbase/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Kethosbase CLI — login, link, and run database migrations from the terminal.",
   "bin": {
     "kethosbase": "bin/kethosbase.js"
